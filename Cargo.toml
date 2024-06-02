@@ -24,7 +24,7 @@ path = "src/ui/main.rs"
 
 [dependencies]
 buttplug = "7.1.11"
-csgo-gsi = { features = ["rhai"], path = 'deps/csgo-gsi' }
+csgo-gsi = { features = ["rhai"], git = 'https://github.com/gloss-click/csgo-gsi.git' }
 rhai = { version = "0.18.3", features = ["sync"] }
 futures = "0.3.30"
 toml = "0.8.8"
