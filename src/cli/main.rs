@@ -6,7 +6,7 @@ use std::{env::current_exe, fs::{read_to_string, write}, io::stdin};
 use anyhow::{Context, Error};
 use fehler::throws;
 
-use cs2_buttplug::{async_main, config::Config};
+use cs2_buttplug::{async_main, async_main_with_buttplug, config::Config};
 
 pub fn wait_for_enter() {
     let mut ignored = String::new();
@@ -38,7 +38,7 @@ fn inner_main() {
     let handle = tokio_runtime.handle().clone();
     let (close_send, _close_receive) = tokio::sync::broadcast::channel(64);
     let _result: core::result::Result<(), Error> = tokio_runtime.block_on(async {
-        async_main(config, handle, close_send).await
+        async_main_with_buttplug(config, handle, close_send).await
     });
 
 }

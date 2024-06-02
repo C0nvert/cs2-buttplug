@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Error};
 use buttplug::{
@@ -16,6 +16,18 @@ use tokio::sync::broadcast;
 
 use crate::CloseEvent;
 
+#[derive(Clone)]
+pub enum ClientEvent {
+    DeviceFound(String, u32),
+    DeviceLost(String, u32)
+}
+
+#[derive(Clone)]
+pub enum GuiEvent {
+    DeviceToggle(u32, bool),
+    None,
+}
+
 #[derive(Copy, Clone)]
 pub enum BPCommand {
     Vibrate(f64),
@@ -25,12 +37,14 @@ pub enum BPCommand {
 
 
 async fn run_buttplug_catch(
+    client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>, 
+    gui_receive: Option<broadcast::Receiver<GuiEvent>>,
     close_receive: broadcast::Receiver<CloseEvent>, 
     client: ButtplugClient,
     transport: ButtplugWebsocketClientTransport,
     rx: broadcast::Receiver<BPCommand>,
 ) {
-    let err = run_buttplug(close_receive, client, transport, rx).await;
+    let err = run_buttplug(client_send, gui_receive, close_receive, client, transport, rx).await;
     if let Err(err) = err {
         error!("Buttplug thread error: {}", err);
     }
@@ -38,6 +52,8 @@ async fn run_buttplug_catch(
 
 #[throws]
 async fn run_buttplug(
+    client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>,
+    gui_receive: Option<broadcast::Receiver<GuiEvent>>,
     close_receive: broadcast::Receiver<CloseEvent>, 
     client: ButtplugClient,
     transport: ButtplugWebsocketClientTransport,
@@ -56,6 +72,7 @@ async fn run_buttplug(
     enum Event {
         Buttplug(ButtplugClientEvent),
         Command(BPCommand),
+        GuiCommand(GuiEvent),
         CloseCommand,
     }
 
@@ -68,21 +85,52 @@ async fn run_buttplug(
             })
         }),
     );
-    let mut merge_bp_and_commands_and_close = tokio_stream::StreamExt::merge(
+
+    let merge_bp_and_commands_and_close = tokio_stream::StreamExt::merge(
         merge_bp_and_commands,
         close_recv.map(|_| Event::CloseCommand),
+    );
+
+    // couldn't find a more elegant way of doing this
+    let (_, dummy_recv) = tokio::sync::broadcast::channel(1);
+    let gui_receive_stream = tokio_stream::wrappers::BroadcastStream::new(gui_receive.unwrap_or(dummy_recv));
+    
+    let mut merge_bp_and_commands_and_close_and_gui = tokio_stream::StreamExt::merge(
+        merge_bp_and_commands_and_close,
+        gui_receive_stream.map(|ev| {
+            Event::GuiCommand(match ev {
+                Ok(ev) => ev,
+                Err(_) => GuiEvent::None, // stop on error
+            })
+        }),
     );
 
     client.connect(connector).await?;
     client.start_scanning().await.context("Couldn't start buttplug.io device scan")?;
 
-    while let Some(event) = merge_bp_and_commands_and_close.next().await {
+    let mut enabled_devices = HashSet::new();
+
+    while let Some(event) = merge_bp_and_commands_and_close_and_gui.next().await {
         match event {
             Event::Buttplug(ButtplugClientEvent::DeviceAdded(dev)) => {
+                if let Some(ref client_send) = client_send {
+                    match client_send.send(ClientEvent::DeviceFound(dev.name().clone(), dev.index())) {
+                        Ok(_) => {},
+                        Err(e) => error!("Error sending client event: {}", e),
+                    }
+                }
                 info!("Intiface: Device added: {}", dev.name());
+                enabled_devices.insert(dev.index());
             }
             Event::Buttplug(ButtplugClientEvent::DeviceRemoved(dev)) => {
+                if let Some(ref client_send) = client_send {
+                    match client_send.send(ClientEvent::DeviceLost(dev.name().clone(), dev.index())) {
+                        Ok(_) => {},
+                        Err(e) => error!("Error sending client event: {}", e),
+                    }
+                }
                 info!("Intiface: Device removed: {}", dev.name());
+                enabled_devices.remove(&dev.index());
             }
             Event::Buttplug(ButtplugClientEvent::ServerDisconnect) => {
                 info!("Intiface: server disconnected, shutting down.");
@@ -104,22 +152,28 @@ async fn run_buttplug(
                 match command {
                     BPCommand::Vibrate(speed) => {
                         for device in client.devices() {
-                            info!("Setting speed {} across device {}", speed, &device.name());
-                            info!("Sending vibrate speed {} to device {}", speed, &device.name());
-                            device.vibrate(&ScalarValueCommand::ScalarValue(speed.min(1.0))).await.context("Couldn't send Vibrate command")?;
+                            if enabled_devices.contains(&device.index()) {
+                                info!("Setting speed {} across device {}", speed, &device.name());
+                                info!("Sending vibrate speed {} to device {}", speed, &device.name());
+                                device.vibrate(&ScalarValueCommand::ScalarValue(speed.min(1.0))).await.context("Couldn't send Vibrate command")?;
+                            }
                         }
                     },
                     BPCommand::Stop => {
                         for device in client.devices() {
-                            info!("Stopping device {}", &device.name());
-                            device.vibrate(&ScalarValueCommand::ScalarValue(0.0)).await.context("Couldn't send Stop command")?;
+                            if enabled_devices.contains(&device.index()) {
+                                info!("Stopping device {}", &device.name());
+                                device.vibrate(&ScalarValueCommand::ScalarValue(0.0)).await.context("Couldn't send Stop command")?;
+                            }
                         }
                     },
                     BPCommand::VibrateIndex(speed, index) => {
                         for device in client.devices() {
-                            info!("Setting speed {} on index {} on device {}", speed, index, &device.name());
-                            let map = HashMap::from([(index, speed.min(1.0))]);
-                            device.vibrate(&ScalarValueCommand::ScalarValueMap(map)).await.context("Couldn't send VibrateIndex command")?;
+                            if enabled_devices.contains(&device.index()) {
+                                info!("Setting speed {} on index {} on device {}", speed, index, &device.name());
+                                let map = HashMap::from([(index, speed.min(1.0))]);
+                                device.vibrate(&ScalarValueCommand::ScalarValueMap(map)).await.context("Couldn't send VibrateIndex command")?;
+                            }
                         }
                     }
                 }
@@ -128,6 +182,20 @@ async fn run_buttplug(
                 info!("Buttplug thread asked to quit");
                 client.disconnect().await.expect("Failed to disconnect from buttplug");
             },
+            Event::GuiCommand(GuiEvent::DeviceToggle(index, checked)) => {
+                info!("Device {} enabled {}", index, checked);
+                match checked {
+                    true => {
+                        enabled_devices.insert(index);
+                    },
+                    false => {
+                        enabled_devices.remove(&index);
+                    }
+                }
+            }
+            Event::GuiCommand(GuiEvent::None) => {
+                info!("GUI command");
+            }
         }
     }
 
@@ -136,7 +204,7 @@ async fn run_buttplug(
 }
 
 #[throws]
-pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_url: &String) -> (broadcast::Sender<BPCommand>, RemoteHandle<()>) {
+pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_url: &String, client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>, gui_receive: Option<broadcast::Receiver<GuiEvent>>) -> (broadcast::Sender<BPCommand>, RemoteHandle<()>) {
     info!("Spawning buttplug thread");
     let client_name = "CS2 integration";
     let (send, recv) = broadcast::channel(5);
@@ -149,6 +217,8 @@ pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_
     };
 
     let handle = async_manager::spawn_with_handle(run_buttplug_catch(
+                client_send,
+                gui_receive,
                 close_receive,
                 bpclient,
                 transport,

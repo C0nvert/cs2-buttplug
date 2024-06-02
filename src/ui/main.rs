@@ -1,29 +1,60 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::future::IntoFuture;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex, RwLock};
+use buttplug::client;
 use eframe::egui;
 use cs2_buttplug::config::Config;
-use cs2_buttplug::{async_main, CloseEvent};
+use cs2_buttplug::{async_main, spawn_buttplug_client, ClientEvent, CloseEvent, GuiEvent};
 use futures::future::RemoteHandle;
 use futures::FutureExt;
+use log::error;
 use tokio::runtime::Runtime;
+use std::io;
+use pretty_env_logger::env_logger::Target;
 
 const CS2_BP_DIR_PATH: &str = "CS2_BP_DIR_PATH";
 const CS2_BP_PORT: &str = "CS2_BP_PORT";
 const CS2_BP_INTIFACE_ADDR: &str = "CS2_BP_INTIFACE_ADDR";
 
+// This struct is used as an adaptor, it implements io::Write and forwards the buffer to a mpsc::Sender
+struct GuiLog {
+    //log_buffer: &'a mut Vec<String>,
+    logs: Arc<Mutex<Vec<String>>>,
+}
+
+impl io::Write for GuiLog {
+    // On write we forward each u8 of the buffer to the sender and return the length of the buffer
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        
+        self.logs.lock().unwrap().push(std::str::from_utf8(buf).unwrap().to_string());
+        std::io::stdout().write(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
+    let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    
     pretty_env_logger::formatted_builder()
         .filter_level(log::LevelFilter::Warn)
         .filter(Some("cs2_buttplug"), log::LevelFilter::max())
         .filter(Some("cs2_buttplug_ui"), log::LevelFilter::max())
         .filter(Some("csgo_gsi"), log::LevelFilter::max())
+        .target(Target::Pipe(Box::new(GuiLog{logs: logs.clone()})))
         .init();
 
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 300.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 400.0]),
         ..Default::default()
     };
 
@@ -49,9 +80,16 @@ fn main() -> Result<(), eframe::Error> {
                 }
             }
 
-            Box::<CsButtplugUi>::new(CsButtplugUi::new(config))
+            Box::<CsButtplugUi>::new(CsButtplugUi::new(config, logs))
         }),
     )
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Status {
+    Absent,
+    Disabled,
+    Enabled
 }
 
 struct CsButtplugUi {
@@ -61,11 +99,20 @@ struct CsButtplugUi {
     close_send: tokio::sync::broadcast::Sender<CloseEvent>,
     _close_receive: tokio::sync::broadcast::Receiver<CloseEvent>,
 
+    client_events: Option<tokio::sync::broadcast::Receiver<ClientEvent>>,
+    gui_send: Option<tokio::sync::broadcast::Sender<GuiEvent>>,
+
     editor_port: String,
+
+    logs: Arc<Mutex<Vec<String>>>,
+
+    devices: HashMap<u32, (String, Status)>,
+
+    autostarted: bool,
 }
 
 impl CsButtplugUi {
-    fn new(config: Config) -> Self {
+    fn new(config: Config, logs: Arc<Mutex<Vec<String>>>) -> Self {
         let (close_send, _close_receive) = tokio::sync::broadcast::channel(64);
 
         Self {
@@ -73,7 +120,12 @@ impl CsButtplugUi {
             main_handle: None,
             config: config,
             close_send, _close_receive,
+            client_events: None,
+            gui_send: None,
             editor_port: "".to_string(),
+            logs,
+            devices: HashMap::new(),
+            autostarted: false,
         }
     }
 }
@@ -84,8 +136,20 @@ impl CsButtplugUi {
         let handle = self.tokio_runtime.handle().clone();
         let config = self.config.clone();
         let sender = self.close_send.clone();
+
+        let (client_send, client_receive) = tokio::sync::broadcast::channel(64);
+        self.client_events = Some(client_receive);
+        let (gui_send, gui_receive) = tokio::sync::broadcast::channel(64);
+        self.gui_send = Some(gui_send);
+
+        let bp_future = async {
+            spawn_buttplug_client(&config.buttplug_server_url, sender.subscribe(), Some(client_send), Some(gui_receive)).await.unwrap()
+        };
+
+        let (buttplug_send, buttplug_thread) = self.tokio_runtime.block_on(bp_future);
+
         let (main_future, main_handle) = async {
-            let _ = async_main(config, handle, sender).await;
+            let _ = async_main(config, handle, sender, buttplug_send, buttplug_thread).await;
         }.remote_handle();
 
         let tokio_handle = self.tokio_runtime.handle().clone();
@@ -107,8 +171,21 @@ impl CsButtplugUi {
 
 impl eframe::App for CsButtplugUi {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+
+        if let Some(ref mut client_events) = self.client_events {
+            while let Ok(ev) = client_events.try_recv() {
+                match ev {
+                    ClientEvent::DeviceFound(name, index) => {
+                        self.devices.insert(index, (name, Status::Enabled));
+                    },
+                    ClientEvent::DeviceLost(name, index) => {
+                        self.devices.insert(index, (name, Status::Absent));
+                    },
+                }
+            }
+        }
         
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ctx, |mut ui| {
             ui.heading("CS2 Buttplug.io integration");
             ui.add_space(5.0);
 
@@ -185,6 +262,10 @@ impl eframe::App for CsButtplugUi {
                 if ui.button("Launch").clicked() {
                     self.launch_main();
                 }
+                if !self.autostarted {
+                    self.launch_main();
+                    self.autostarted = true
+                }
             } else {
                 if ui.button("Relaunch").clicked() {
                     self.close();
@@ -206,6 +287,50 @@ impl eframe::App for CsButtplugUi {
             if ctx.input(|i| i.viewport().close_requested()) {
                 self.close();
             }
+
+            ui.separator();
+
+            ui.heading("Devices");
+
+            fn status_to_label(status: &Status) -> &str {                
+                match status {
+                    Status::Enabled => "Enabled",
+                    Status::Disabled => "Disabled",
+                    Status::Absent => "Disconnected"
+                }
+            }
+
+            for (index, (name, ref mut status)) in self.devices.iter_mut() {
+                ui.set_enabled(match status {
+                    Status::Absent => false,
+                    _ => true,
+                });
+
+                let mut checked = *status == Status::Enabled;
+                if (ui.checkbox(&mut checked, format!("{}: {}", name, status_to_label(status)))).changed() {
+                    *status = match checked {
+                        true => Status::Enabled,
+                        false => Status::Disabled,
+                    };
+                    if let Some(ref mut gui_send) = self.gui_send {
+                        match gui_send.send(GuiEvent::DeviceToggle(*index, checked)) {
+                            Ok(_) => {},
+                            Err(e) => error!("Error sending GUI command: {}", e),
+                        }
+                    }
+                }
+            }
+
+            egui::CollapsingHeader::new("Log").show(&mut ui, |mut ui| {
+                egui::ScrollArea::new([false, true]).max_height(100.0).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {
+                    let logs = self.logs.lock().unwrap();
+
+                    let log = logs.concat();
+
+                    ui.add_sized(egui::vec2(650.0, 100.0), egui::TextEdit::multiline(&mut log.as_ref()));
+                });
+            });
+            
         });
     }
 }

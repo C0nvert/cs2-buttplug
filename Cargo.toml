@@ -1,6 +1,6 @@
 [package]
 name = "cs2_buttplug"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["gloss-click", "hornycactus <me@cactus.sexy>"]
 edition = "2018"
 description = "Buttplug.io mod for CS2"
@@ -34,7 +34,7 @@ fehler = "1.0.0"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["sync"] }
 log = "0.4.20"
-pretty_env_logger = "0.4.0"
+pretty_env_logger = "0.5.0"
 git-transport = { version = "0.2.1", features = ["http-client-curl"] }
 semver = "0.10.0"
 socket2 = "0.3.16"
