@@ -5,6 +5,8 @@ I am not cool enough to think up a CS2 pun with the sheer power of 'Crotch-Stim:
 I've tried to preserve as much of the original readme as possible (all license terms etc persist) but have updated the relevant parts.
 This update depends on a patched version of the csgo-gsi crate that I have included as a submodule.
 
+![csbp 0 8 0](https://github.com/gloss-click/cs2-buttplug/assets/157309744/d87295f2-b41a-4c12-b09d-489594e38625)
+
 ## Important ethical disclaimer
 
 This software is intended for risk-aware, consensual sexual enjoyment by all.
@@ -104,6 +106,22 @@ This software is released under the [Fuck Around and Find Out License version 0.
 The `csgo-gsi` library that this uses is released under the [Anti-Capitalist Software License version 1.4](https://anticapitalist.software/).
 
 ## Changelog
+
+v0.8.0 - 2024-06-02
+- Add log panel to gui
+- List devices in GUI and allow enabling and disabling them 
+- Automatically launch client on start 
+- Break up core nest of futures a little bit for more interactivity in future
+
+v0.7.0 - 2024-04-15
+- Resolves an issue where device discovery events could arrive before we were monitoring for them.
+
+v0.6.0 - 2024-03-14
+- Updates from CS faster to be more responsive and allows multiple time periods to overlap, as well as adding basic support for devices with multiple facets.
+
+v0.5.0 - 2024-02-01
+- Swaps the gotham web server out for the warp web server in csgo-gsi, as gotham did not like being restarted once it had started to process requests.
+- Code complexity reduction too, probably at the cost of resiliance against bad requests.
 
 v0.4.0 - 2024-01-22
 - Updated for CS2/Buttplug 7+
