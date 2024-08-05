@@ -170,8 +170,9 @@ async fn run_buttplug(
                     BPCommand::VibrateIndex(speed, index) => {
                         for device in client.devices() {
                             if enabled_devices.contains(&device.index()) {
-                                info!("Setting speed {} on index {} on device {}", speed, index, &device.name());
-                                let map = HashMap::from([(index, speed.min(1.0))]);
+                                let nindex = index.min(device.vibrate_attributes().len() as u32 - 1);
+                                info!("Setting speed {} on index {} on device {}", speed, nindex, &device.name());
+                                let map = HashMap::from([(nindex, speed.min(1.0))]);
                                 device.vibrate(&ScalarValueCommand::ScalarValueMap(map)).await.context("Couldn't send VibrateIndex command")?;
                             }
                         }
