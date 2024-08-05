@@ -30,7 +30,7 @@ impl ScriptHost {
         
         engine.set_max_call_levels(200);
         engine.set_max_expr_depths(200, 200);
-        engine.set_max_operations(200);
+        engine.set_max_operations(20000);
 
         engine.load_package(CSGOPackage::new().get());
         engine.register_fn("vibrate", move |speed: f64, time: f64| {
@@ -50,6 +50,9 @@ impl ScriptHost {
             if let Err(err) = result {
                 error!("Error sending command from script to buttplug: {}", err);
             }
+        });
+        engine.register_fn("log", move |msg: String| {
+            info!("Script: {}", msg);
         });
         let mut scope = Scope::new();
 
