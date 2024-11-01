@@ -8,7 +8,6 @@ use std::{
 use anyhow::{Context, Error};
 use buttplug::BPCommand;
 use csgo_gsi::GSIServer;
-use fehler::throws;
 use futures::{future::RemoteHandle, TryFutureExt};
 
 mod buttplug;
@@ -27,31 +26,32 @@ const DEFAULT_GAME_DIR: &str = "C:\\Program Files (x86)\\Steam\\steamapps\\commo
 
 pub type CloseEvent = csgo_gsi::CloseEvent;
 
-#[throws]
-pub async fn spawn_buttplug_client(buttplug_server_url: &String, close_receive: broadcast::Receiver<CloseEvent>, client_send: Option<broadcast::Sender<ClientEvent>>, gui_receive: Option<broadcast::Receiver<GuiEvent>>) -> (broadcast::Sender<BPCommand>, RemoteHandle<()>) {
-    buttplug::spawn_run_thread(close_receive, &buttplug_server_url, client_send, gui_receive).context("couldn't start buttplug client")?
+pub async fn spawn_buttplug_client(buttplug_server_url: &String, close_receive: broadcast::Receiver<CloseEvent>, client_send: Option<broadcast::Sender<ClientEvent>>, gui_receive: Option<broadcast::Receiver<GuiEvent>>) -> Result<(broadcast::Sender<BPCommand>, RemoteHandle<()>), Error> {
+    buttplug::spawn_run_thread(close_receive, &buttplug_server_url, client_send, gui_receive).context("couldn't start buttplug client")
 }
 
-#[throws]
-fn spawn_tasks(config: &Config, tokio_handle: Handle, buttplug_send: broadcast::Sender<BPCommand>) -> (GSIServer, broadcast::Sender<ScriptCommand>, JoinHandle<()>, script::ScriptHost) {
+fn spawn_tasks(config: &Config, tokio_handle: Handle, buttplug_send: broadcast::Sender<BPCommand>) -> Result<(GSIServer, broadcast::Sender<ScriptCommand>, JoinHandle<()>, script::ScriptHost), Error> {
     let gsi_server = csgo::build_server(config.cs_integration_port, match &config.cs_script_dir { Some(dir) => dir.clone(), None => PathBuf::from_str(DEFAULT_GAME_DIR).unwrap() })
         .map_err(|err| anyhow::anyhow!("{}", err)).context("couldn't set up CS integration server")?;
     let (event_proc_send, event_proc_thread) = timer_thread::spawn_timer_thread(tokio_handle, buttplug_send)?;
     let script_host = script::ScriptHost::new(event_proc_send.clone()).context("couldn't start script host")?;
-    (gsi_server, event_proc_send, event_proc_thread, script_host)
+    Ok((gsi_server, event_proc_send, event_proc_thread, script_host))
 }
 
-#[throws]
-pub async fn async_main_with_buttplug(config: Config, tokio_handle: Handle, close_send: broadcast::Sender<CloseEvent>) {
+pub async fn async_main_with_buttplug(config: Config, tokio_handle: Handle, close_send: broadcast::Sender<CloseEvent>) -> Result<(), Error> {
     let (buttplug_send, buttplug_thread) = spawn_buttplug_client(&config.buttplug_server_url, close_send.subscribe(), None, None).await.unwrap();
-    async_main(config, tokio_handle, close_send, buttplug_send, buttplug_thread).await?;
+    async_main(config, tokio_handle, close_send, buttplug_send, buttplug_thread, None::<fn(&csgo_gsi::Update)>).await.unwrap();
+    Ok(())
 }
 
-#[throws]
-pub async fn async_main(config: Config, tokio_handle: Handle, close_send: broadcast::Sender<CloseEvent>, buttplug_send: broadcast::Sender<BPCommand>, buttplug_thread: RemoteHandle<()>) {
+pub async fn async_main<T: 'static + FnMut(&csgo_gsi::Update) + Send>(config: Config, tokio_handle: Handle, close_send: broadcast::Sender<CloseEvent>, buttplug_send: broadcast::Sender<BPCommand>, buttplug_thread: RemoteHandle<()>, gsi_listener: Option<T>) -> Result<(), Error> {
     match spawn_tasks(&config, tokio_handle.clone(), buttplug_send) {
         Ok((mut gsi_server, event_proc_send, event_proc_thread, mut script_host)) => {
             gsi_server.add_listener(move |update| script_host.handle_update(update));
+
+            if let Some(mut listener) = gsi_listener {
+                gsi_server.add_listener(move |update| listener(update));
+            }
                                         
             let gsi_close_event_receiver = close_send.subscribe();
             
@@ -75,5 +75,5 @@ pub async fn async_main(config: Config, tokio_handle: Handle, close_send: broadc
         Err(e) => info!("Error : {}", e.to_string()),
     };
 
-    Ok::<(), Error>(()).expect("Error ending main task")
+    Ok(())
 }

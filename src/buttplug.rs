@@ -10,7 +10,6 @@ use buttplug::{
     core::message::serializer::ButtplugClientJSONSerializer,
     util::async_manager
 };
-use fehler::throws;
 use futures::{future::RemoteHandle, StreamExt};
 use tokio::sync::broadcast;
 
@@ -50,7 +49,6 @@ async fn run_buttplug_catch(
     }
 }
 
-#[throws]
 async fn run_buttplug(
     client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>,
     gui_receive: Option<broadcast::Receiver<GuiEvent>>,
@@ -58,7 +56,7 @@ async fn run_buttplug(
     client: ButtplugClient,
     transport: ButtplugWebsocketClientTransport,
     rx: broadcast::Receiver<BPCommand>,
-) {
+) -> Result<(), Error> {
     info!("Launched buttplug.io thread");
 
     let recv = tokio_stream::wrappers::BroadcastStream::new(rx);
@@ -202,10 +200,10 @@ async fn run_buttplug(
 
     // And now we're done!
     info!("Exiting buttplug thread");
+    Ok(())
 }
 
-#[throws]
-pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_url: &String, client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>, gui_receive: Option<broadcast::Receiver<GuiEvent>>) -> (broadcast::Sender<BPCommand>, RemoteHandle<()>) {
+pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_url: &String, client_send: Option<tokio::sync::broadcast::Sender<ClientEvent>>, gui_receive: Option<broadcast::Receiver<GuiEvent>>) -> Result<(broadcast::Sender<BPCommand>, RemoteHandle<()>), Error> {
     info!("Spawning buttplug thread");
     let client_name = "CS2 integration";
     let (send, recv) = broadcast::channel(5);
@@ -226,5 +224,5 @@ pub fn spawn_run_thread(close_receive: broadcast::Receiver<CloseEvent>, connect_
                 recv,
             ))?;
 
-    (send, handle)
+    Ok((send, handle))
 }

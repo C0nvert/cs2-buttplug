@@ -4,7 +4,6 @@ extern crate log;
 use std::{env::current_exe, fs::{read_to_string, write}, io::stdin};
 
 use anyhow::{Context, Error};
-use fehler::throws;
 
 use cs2_buttplug::{async_main, async_main_with_buttplug, config::Config};
 
@@ -13,8 +12,7 @@ pub fn wait_for_enter() {
     let _ = stdin().read_line(&mut ignored);
 }
 
-#[throws]
-pub fn get_config() -> Config {
+pub fn get_config() -> Result<Config, Error> {
     let exe_path = current_exe().context("couldn't get path of cs2-buttplug.exe")?;
     let config_path = exe_path.with_extension("toml");
     if !config_path.exists() {
@@ -25,11 +23,10 @@ pub fn get_config() -> Config {
     }
 
     let config_text = read_to_string(&config_path).context("couldn't read config file")?;
-    toml::from_str(&config_text).context("couldn't parse config file")?
+    toml::from_str(&config_text).context("couldn't parse config file")
 }
 
-#[throws]
-fn inner_main() {
+fn inner_main() -> Result<(), Error> {
     info!("This is cs2-buttplug (cli), v{}, original author hornycactus (https://cactus.sexy)", env!("CARGO_PKG_VERSION"));
 
     let config = get_config()?;
@@ -41,6 +38,7 @@ fn inner_main() {
         async_main_with_buttplug(config, handle, close_send).await
     });
 
+    Ok(())
 }
 
 fn main() { 

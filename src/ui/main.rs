@@ -149,7 +149,7 @@ impl CsButtplugUi {
         let (buttplug_send, buttplug_thread) = self.tokio_runtime.block_on(bp_future);
 
         let (main_future, main_handle) = async {
-            let _ = async_main(config, handle, sender, buttplug_send, buttplug_thread).await;
+            let _ = async_main(config, handle, sender, buttplug_send, buttplug_thread, None::<fn(&csgo_gsi::Update)> /* here */).await;
         }.remote_handle();
 
         let tokio_handle = self.tokio_runtime.handle().clone();
@@ -320,6 +320,15 @@ impl eframe::App for CsButtplugUi {
                     }
                 }
             }
+            ui.separator();
+
+            ui.heading("Game State");
+
+            egui::CollapsingHeader::new("Values").show(&mut ui, |mut ui| {
+                
+            });
+
+            ui.separator();
 
             egui::CollapsingHeader::new("Log").show(&mut ui, |mut ui| {
                 egui::ScrollArea::new([false, true]).max_height(100.0).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {

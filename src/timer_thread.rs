@@ -1,7 +1,6 @@
 use std::{collections::{BTreeMap}, time::{SystemTime, Duration}};
 
 use anyhow::Error;
-use fehler::throws;
 use tokio::{sync::broadcast, task::JoinHandle, runtime::Handle};
 use crate::buttplug::BPCommand;
 
@@ -14,19 +13,17 @@ pub enum ScriptCommand {
     Close,
 }
 
-#[throws]
-pub fn spawn_timer_thread(h: Handle, send: broadcast::Sender<BPCommand>) -> (broadcast::Sender<ScriptCommand>, JoinHandle<()>) {
+pub fn spawn_timer_thread(h: Handle, send: broadcast::Sender<BPCommand>) -> Result<(broadcast::Sender<ScriptCommand>, JoinHandle<()>), Error> {
     let (nsend, nrecv) = broadcast::channel(64);
 
     let handle = tokio::task::spawn_blocking(move || { 
         h.block_on(timer_thread(send, nrecv)).expect("Timer thread dispatch failed."); 
     });
     
-    (nsend, handle)
+    Ok((nsend, handle))
 }
 
-#[throws]
-async fn timer_thread(send: broadcast::Sender<BPCommand>, mut recv: broadcast::Receiver<ScriptCommand>) {
+async fn timer_thread(send: broadcast::Sender<BPCommand>, mut recv: broadcast::Receiver<ScriptCommand>) -> Result<(), Error> {
     let mut pqueue = BTreeMap::new();
 
     info!("started event process thread");
@@ -84,5 +81,5 @@ async fn timer_thread(send: broadcast::Sender<BPCommand>, mut recv: broadcast::R
 
     };
     info!("ending event process thread");
-    ()
+    Ok(())
 }

@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::{Context, Error};
 use csgo_gsi::update::{Update, CSGOPackage};
-use fehler::throws;
 use rhai::{AST, Engine, packages::Package, Scope, RegisterFn};
 use tokio::sync::broadcast;
 use crate::timer_thread::ScriptCommand;
@@ -21,8 +20,7 @@ pub struct ScriptHost {
 }
 
 impl ScriptHost {
-    #[throws]
-    pub fn new(send: broadcast::Sender<ScriptCommand>) -> Self {
+    pub fn new(send: broadcast::Sender<ScriptCommand>) -> Result<Self, Error> {
         let vsend = send.clone();
         let visend = send.clone();
         let ssend = send.clone();
@@ -76,13 +74,13 @@ impl ScriptHost {
         // if there's some global state or on-boot handling, make sure it runs
         engine.consume_ast_with_scope(&mut scope, &ast)
             .map_err(|err| anyhow::anyhow!("{}", err))?;
-        Self {
+        Ok(Self {
             engine,
             scope,
             ast,
             script_path,
             last_modified: mtime,
-        }
+        })
     }
 
     pub fn handle_update(&mut self, update: &Update) {
