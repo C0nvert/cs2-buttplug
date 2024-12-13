@@ -20,7 +20,10 @@ fn handle_update(update) {
                         kdiff = 5;
                     }
                     for i in range(0, kdiff) {
-                        vibrate_index(kills.to_float()/50.0, 1.0, (kills + i) % 2); 
+                        vibrate_index(kills.to_float()/50.0, 1.0, (kills + i) % 2);
+                        linear(500, 1.0);
+						sleep(0.5);
+						linear(500, 0.0);
                     }
                 }
 
@@ -28,6 +31,7 @@ fn handle_update(update) {
 
                 if assists < update.player.match_stats.assists {
                     vibrate(0.15, 1.0);
+                    linear(500, 0.5);
                 }
                 
                 assists = update.player.match_stats.assists;

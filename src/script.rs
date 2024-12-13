@@ -43,12 +43,21 @@ impl ScriptHost {
                 error!("Error sending command from script to buttplug: {}", err);
             }
         });
+        engine.register_fn("linear", move |duration: i64, position: f64| {
+            let result = send.send(ScriptCommand::Linear(duration as u32, position));
+            if let Err(err) = result {
+                error!("Error sending Linear command: {}", err);
+            }
+        });              
         engine.register_fn("stop", move || {
             let result = ssend.send(ScriptCommand::Stop);
             if let Err(err) = result {
                 error!("Error sending command from script to buttplug: {}", err);
             }
         });
+        engine.register_fn("sleep", |time: f64| {
+            std::thread::sleep(std::time::Duration::from_secs_f64(time));
+        });        
         engine.register_fn("log", move |msg: String| {
             info!("Script: {}", msg);
         });

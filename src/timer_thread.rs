@@ -9,6 +9,7 @@ use crate::buttplug::BPCommand;
 pub enum ScriptCommand {
     VibrateFor(f64, f64),
     VibrateForWithIndex(f64, f64, u32),
+    Linear(u32, f64), // Duration in milliseconds, position as a percentage
     Stop,
     Close,
 }
@@ -41,6 +42,9 @@ async fn timer_thread(send: broadcast::Sender<BPCommand>, mut recv: broadcast::R
                     pqueue.insert(timestamp, BPCommand::VibrateIndex(strength, index));
                     pqueue.insert(timestamp + Duration::from_secs_f64(time), BPCommand::VibrateIndex(0.0, index));
                 },
+                ScriptCommand::Linear(duration, position) => {
+                    pqueue.insert(timestamp, BPCommand::Linear(duration, position));
+                },                
                 ScriptCommand::Stop => {
                     pqueue.insert(timestamp, BPCommand::Stop);
                 },
