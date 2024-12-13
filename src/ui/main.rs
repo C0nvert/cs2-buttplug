@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+
+use std::collections::{HashMap};
 use std::future::IntoFuture;
 use std::path::PathBuf;
-use std::rc::Rc;
+
 use std::str::FromStr;
-use std::sync::{Arc, Mutex, RwLock};
-use buttplug::client;
+use std::sync::{Arc, Mutex};
+
 use eframe::egui;
 use cs2_buttplug::config::Config;
 use cs2_buttplug::{async_main, spawn_buttplug_client, ClientEvent, CloseEvent, GuiEvent};
@@ -324,14 +324,14 @@ impl eframe::App for CsButtplugUi {
 
             ui.heading("Game State");
 
-            egui::CollapsingHeader::new("Values").show(&mut ui, |mut ui| {
+            egui::CollapsingHeader::new("Values").show(&mut ui, |_ui| {
                 
             });
 
             ui.separator();
 
             egui::CollapsingHeader::new("Log").show(&mut ui, |mut ui| {
-                egui::ScrollArea::new([false, true]).max_height(100.0).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {
+                egui::ScrollArea::new([false, true]).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {
                     let logs = self.logs.lock().unwrap();
 
                     let log = logs.concat();

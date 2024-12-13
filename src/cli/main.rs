@@ -5,7 +5,7 @@ use std::{env::current_exe, fs::{read_to_string, write}, io::stdin};
 
 use anyhow::{Context, Error};
 
-use cs2_buttplug::{async_main, async_main_with_buttplug, config::Config};
+use cs2_buttplug::{async_main_with_buttplug, config::Config};
 
 pub fn wait_for_enter() {
     let mut ignored = String::new();
