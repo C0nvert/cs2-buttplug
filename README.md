@@ -64,23 +64,43 @@ let falloff = 0.0;
 let kills = 0;
 let assists = 0;
 
+let steam_id = "";
+
 fn handle_update(update) {
     if update.player != () {
-        if update.player.match_stats != () {
-            if kills < update.player.match_stats.kills {
-                kills = update.player.match_stats.kills;
-                vibrate(0.3 + kills.to_float()/25.0, 1.0);
-            }
-            if assists < update.player.match_stats.assists {
-                assists = update.player.match_stats.assists;
-                vibrate(0.15, 1.0);
-            }
+        if steam_id == "" {
+            steam_id = update.player.steam_id;
+        }
+        if steam_id == update.player.steam_id {
+            if update.player.match_stats != () {
+                if kills < update.player.match_stats.kills {
+                    let kdiff = (update.player.match_stats.kills - kills);
+                    if kdiff > 5 {
+                        kdiff = 5;
+                    }
+                    for i in range(0, kdiff) {
+                        vibrate_index(kills.to_float()/50.0, 1.0, (kills + i) % 2);
+                        linear(500, 1.0);
+						sleep(0.5);
+						linear(500, 0.0);
+                    }
+                }
 
-            if update.player.match_stats.kills == 0 {
-                kills = 0;
-            }
-            if update.player.match_stats.assists == 0 {
-                assists = 0;
+                kills = update.player.match_stats.kills;
+
+                if assists < update.player.match_stats.assists {
+                    vibrate(0.15, 1.0);
+                    linear(500, 0.5);
+                }
+                
+                assists = update.player.match_stats.assists;
+
+                if update.player.match_stats.kills == 0 {
+                    kills = 0;
+                }
+                if update.player.match_stats.assists == 0 {
+                    assists = 0;
+                }
             }
         }
     }
@@ -96,7 +116,12 @@ That's why the example script checks if things are equal to `()`.
 All the enums defined by `csgo-gsi` can be `.to_string()`ed and tested against string values, like the default script does for `WeaponState`.
 All the maps get translated into Rhai maps; several of those should probably just be arrays in the first place, so go poke the `csgo-gsi` author about that if you need reasonable access to that data.
 
-The only command functions implemented are `vibrate(strength, duration_in_seconds)` and `stop()` but the infrastructure is there to add more.
+Command functions currently implemented are:
+- `vibrate(strength, duration in seconds)`
+- `vibrate_index(speed, duration in seconds, index of motor)`
+- `stop()`
+- `linear(duration in milliseconds, position in percent from 0.0 to 1.0)`
+- `sleep(duration in seconds);`
 
 Feel free to file a github issue for any problems you have and I'll try to take a look.
 
