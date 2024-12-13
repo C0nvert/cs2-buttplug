@@ -4,7 +4,7 @@ use anyhow::{Context, Error};
 use buttplug::{
     client::{
         ButtplugClient,
-        ButtplugClientEvent, device::ScalarValueCommand
+        ButtplugClientEvent, device::ScalarValueCommand, device::LinearCommand
     },
     core::connector::{ButtplugRemoteClientConnector, ButtplugWebsocketClientTransport},
     core::message::serializer::ButtplugClientJSONSerializer,
@@ -168,10 +168,10 @@ async fn run_buttplug(
                     BPCommand::VibrateIndex(speed, index) => {
                         for device in client.devices() {
                             if enabled_devices.contains(&device.index()) {
-                                let nindex = index.min(device.vibrate_attributes().len() as u32 - 1);
+                                let nindex = index.min(device.linear_attributes().len() as u32 - 1); //I just replaced each vibration command with the corresponding linear command since I couldn't figure out how to add a new command
                                 info!("Setting speed {} on index {} on device {}", speed, nindex, &device.name());
-                                let map = HashMap::from([(nindex, speed.min(1.0))]);
-                                device.vibrate(&ScalarValueCommand::ScalarValueMap(map)).await.context("Couldn't send VibrateIndex command")?;
+                                let map = HashMap::from([(nindex, (500 as u32, 0.20 as f64))]); //What am I even doing?
+                                device.linear(&LinearCommand::LinearMap(map)).await.context("Couldn't send VibrateIndex command")?;
                             }
                         }
                     }
