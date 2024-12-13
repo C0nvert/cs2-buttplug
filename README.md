@@ -81,8 +81,8 @@ fn handle_update(update) {
                     for i in range(0, kdiff) {
                         vibrate_index(kills.to_float()/50.0, 1.0, (kills + i) % 2);
                         linear(500, 1.0);
-						sleep(0.5);
-						linear(500, 0.0);
+			sleep(0.5);
+			linear(500, 0.0);
                     }
                 }
 
