@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use buttplug::client;
+use csgo_gsi::update::player::WeaponState;
 use eframe::egui;
 use cs2_buttplug::config::Config;
 use cs2_buttplug::{async_main, spawn_buttplug_client, ClientEvent, CloseEvent, GuiEvent};
@@ -347,13 +348,26 @@ impl eframe::App for CsButtplugUi {
                     if let Some(ref player) = update.player {
                         ui.label(format!("name: {} team: {}", player.name, match player.team { None => "", Some(csgo_gsi::update::Team::T) => "Terrorists", Some(csgo_gsi::update::Team::CT) => "CTs"}));
                         if let Some(ref match_stats) = player.match_stats {
-                            ui.label(format!("kills: {} deaths: {}", match_stats.kills, match_stats.deaths));
-                            ui.label(format!("assists: {} mvps: {}", match_stats.assists, match_stats.mvps));
+                            ui.label(format!("kills: {} deaths: {} assists: {} mvps: {}", match_stats.kills, match_stats.deaths, match_stats.assists, match_stats.mvps));
                         }
                         if let Some(ref state) = player.state {
-                            ui.label(format!("health: {} armour: {}", state.health, state.armor));
-                            ui.label(format!("helmet: {} cash: {}", match state.helmet { true => "yes", false => "no" }, state.money));
-                            ui.label(format!("flashed: {} smoked: {}", match state.flashed { i if i > 0 => "yes", _ => "no" }, match state.smoked { i if i > 0 => "yes", _ => "no" }));
+                            ui.label(format!("health: {} armour: {} helmet: {} cash: {}", state.health, state.armor, match state.helmet { true => "yes", false => "no" }, state.money));
+                            ui.label(format!("flashed: {} smoked: {} burning: {} defuse kit: {}", 
+                                match state.flashed { i if i > 0 => "yes", _ => "no" }, 
+                                match state.smoked { i if i > 0 => "yes", _ => "no" },
+                                match state.burning { i if i > 0 => "yes", _ => "no" }, match state.defuse_kit { Some(true) => "yes", _ => "no" }
+                            ));
+                        }
+                        
+                        for (_name, weapon) in player.weapons.iter() {
+                            match weapon.state {
+                                WeaponState::Active => {
+                                    if let (Some(clip), Some(mmax)) = (weapon.ammo_clip, weapon.ammo_clip_max) {
+                                        ui.label(format!("active weapon: {} ammo: {}/{}", weapon.name, clip, mmax));
+                                    }
+                                },
+                                _ => {},
+                            }
                         }
                     }
                 }
