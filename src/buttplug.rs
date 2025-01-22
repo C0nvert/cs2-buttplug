@@ -4,7 +4,7 @@ use anyhow::{Context, Error};
 use buttplug::{
     client::{
         ButtplugClient,
-        ButtplugClientEvent, device::ScalarValueCommand
+        ButtplugClientEvent, device::ScalarValueCommand, device::LinearCommand
     },
     core::connector::{ButtplugRemoteClientConnector, ButtplugWebsocketClientTransport},
     core::message::serializer::ButtplugClientJSONSerializer,
@@ -31,6 +31,7 @@ pub enum GuiEvent {
 pub enum BPCommand {
     Vibrate(f64),
     VibrateIndex(f64, u32),
+    Linear(u32, f64),
     Stop
 }
 
@@ -118,6 +119,9 @@ async fn run_buttplug(
                     }
                 }
                 info!("Intiface: Device added: {}", dev.name());
+                debug!("Device {} capabilities: vibrate: {}, linear: {}", dev.name(),
+                    !dev.vibrate_attributes().is_empty(),
+                    !dev.linear_attributes().is_empty());
                 enabled_devices.insert(dev.index());
             }
             Event::Buttplug(ButtplugClientEvent::DeviceRemoved(dev)) => {
@@ -151,31 +155,78 @@ async fn run_buttplug(
                     BPCommand::Vibrate(speed) => {
                         for device in client.devices() {
                             if enabled_devices.contains(&device.index()) {
-                                info!("Setting speed {} across device {}", speed, &device.name());
-                                info!("Sending vibrate speed {} to device {}", speed, &device.name());
-                                device.vibrate(&ScalarValueCommand::ScalarValue(speed.min(1.0))).await.context("Couldn't send Vibrate command")?;
-                            }
-                        }
-                    },
-                    BPCommand::Stop => {
-                        for device in client.devices() {
-                            if enabled_devices.contains(&device.index()) {
-                                info!("Stopping device {}", &device.name());
-                                device.vibrate(&ScalarValueCommand::ScalarValue(0.0)).await.context("Couldn't send Stop command")?;
+                                if device.vibrate_attributes().is_empty() {
+                                    debug!("Device {} does not support vibration attributes, skipping", device.name());
+                                    continue;
+                                }
+                                device.vibrate(&ScalarValueCommand::ScalarValue(speed.min(1.0)))
+                                    .await
+                                    .context("Couldn't send Vibrate command")?;
                             }
                         }
                     },
                     BPCommand::VibrateIndex(speed, index) => {
                         for device in client.devices() {
                             if enabled_devices.contains(&device.index()) {
-                                let nindex = index.min(device.vibrate_attributes().len() as u32 - 1);
+                                let vibrate_len = device.vibrate_attributes().len() as u32;
+
+                                if vibrate_len == 0 { // Prevent underflow: Check if the device has any vibration attributes before performing subtraction
+                                    debug!("Device {} does not support vibration attributes, skipping", device.name());
+                                    continue;
+                                }
+                                
+                                let nindex = index.min(vibrate_len - 1); // Ensure index is within bounds
                                 info!("Setting speed {} on index {} on device {}", speed, nindex, &device.name());
+                                
                                 let map = HashMap::from([(nindex, speed.min(1.0))]);
                                 device.vibrate(&ScalarValueCommand::ScalarValueMap(map)).await.context("Couldn't send VibrateIndex command")?;
                             }
                         }
+                    },                                      
+                    BPCommand::Linear(duration, position) => {
+                        for device in client.devices() {
+                            if enabled_devices.contains(&device.index()) {
+                                if device.linear_attributes().is_empty() {  // Ensure the device has linear attributes before proceeding
+                                    debug!("Device {} does not support linear movement, skipping", device.name());
+                                    continue;
+                                }
+
+                                let max_index = device.linear_attributes().len() as u32;    // Safe handling: check if the device has at least one linear attribute
+                                
+                                if max_index > 0 {  // Prevent underflow: Making sure we don't subtract from zero
+                                    let nindex = position.min((max_index - 1) as f64);
+                                    info!("Setting linear position {} on device {}", position, device.name());
+                                    let map = HashMap::from([(nindex as u32, (duration as u32, position.min(1.0)))]);
+                                    device.linear(&LinearCommand::LinearMap(map))
+                                        .await
+                                        .context("Couldn't send Linear command")?;
+                                } else {
+                                    debug!("Device {} does not support linear movement, skipping", device.name());
+                                }
+                            }
+                        }
+                    },                                      
+                    BPCommand::Stop => {
+                        for device in client.devices() {
+                            if enabled_devices.contains(&device.index()) {
+                                if !device.vibrate_attributes().is_empty() {
+                                    device.vibrate(&ScalarValueCommand::ScalarValue(0.0))
+                                        .await
+                                        .context("Couldn't send Stop command for vibration")?;
+                                }
+                                if !device.linear_attributes().is_empty() {
+                                    let map = HashMap::from([(0, (0, 0.0))]);
+                                    device.linear(&LinearCommand::LinearMap(map))
+                                        .await
+                                        .context("Couldn't send Stop command for linear movement")?;
+                                }
+                            }
+                        }
+                    },
+                    _ => {
+                        debug!("Received unsupported command, ignoring.");
                     }
-                }
+                }                
             },
             Event::CloseCommand => {
                 info!("Buttplug thread asked to quit");

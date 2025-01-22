@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+
+use std::collections::{HashMap};
 use std::future::IntoFuture;
 use std::path::PathBuf;
-use std::rc::Rc;
+
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
