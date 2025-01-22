@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 use buttplug::client;
 use eframe::egui;
 use cs2_buttplug::config::Config;
@@ -14,8 +15,9 @@ use cs2_buttplug::{async_main, spawn_buttplug_client, ClientEvent, CloseEvent, G
 use futures::future::RemoteHandle;
 use futures::FutureExt;
 use log::error;
+use serde::de::IgnoredAny;
 use tokio::runtime::Runtime;
-use std::io;
+use std::{default, io};
 use pretty_env_logger::env_logger::Target;
 
 const CS2_BP_DIR_PATH: &str = "CS2_BP_DIR_PATH";
@@ -109,6 +111,8 @@ struct CsButtplugUi {
     devices: HashMap<u32, (String, Status)>,
 
     autostarted: bool,
+
+    last_update: Arc<Mutex<Option<csgo_gsi::Update>>>,
 }
 
 impl CsButtplugUi {
@@ -126,6 +130,7 @@ impl CsButtplugUi {
             logs,
             devices: HashMap::new(),
             autostarted: false,
+            last_update: Arc::new(Mutex::new(None))
         }
     }
 }
@@ -142,14 +147,23 @@ impl CsButtplugUi {
         let (gui_send, gui_receive) = tokio::sync::broadcast::channel(64);
         self.gui_send = Some(gui_send);
 
+        //let mut gsi_update = None;
+
         let bp_future = async {
             spawn_buttplug_client(&config.buttplug_server_url, sender.subscribe(), Some(client_send), Some(gui_receive)).await.unwrap()
         };
 
         let (buttplug_send, buttplug_thread) = self.tokio_runtime.block_on(bp_future);
 
-        let (main_future, main_handle) = async {
-            let _ = async_main(config, handle, sender, buttplug_send, buttplug_thread, None::<fn(&csgo_gsi::Update)> /* here */).await;
+        let mutex = self.last_update.clone();
+
+        let func = move |gsi_update: &csgo_gsi::Update| { 
+            let mut locked_update = mutex.lock().unwrap(); 
+            *locked_update = Some(gsi_update.clone());
+        };
+
+        let (main_future, main_handle) = async move {
+            let _ = async_main(config, handle, sender, buttplug_send, buttplug_thread, Some(func) /* None::<fn(&csgo_gsi::Update)> */ /* here */).await;
         }.remote_handle();
 
         let tokio_handle = self.tokio_runtime.handle().clone();
@@ -171,6 +185,8 @@ impl CsButtplugUi {
 
 impl eframe::App for CsButtplugUi {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+
+        ctx.request_repaint_after(Duration::from_millis(10));
 
         if let Some(ref mut client_events) = self.client_events {
             while let Ok(ev) = client_events.try_recv() {
@@ -325,13 +341,28 @@ impl eframe::App for CsButtplugUi {
             ui.heading("Game State");
 
             egui::CollapsingHeader::new("Values").show(&mut ui, |mut ui| {
-                
+                let locked_update = self.last_update.lock().unwrap();
+
+                if let Some(ref update) = *locked_update {
+                    if let Some(ref player) = update.player {
+                        ui.label(format!("name: {} team: {}", player.name, match player.team { None => "", Some(csgo_gsi::update::Team::T) => "Terrorists", Some(csgo_gsi::update::Team::CT) => "CTs"}));
+                        if let Some(ref match_stats) = player.match_stats {
+                            ui.label(format!("kills: {} deaths: {}", match_stats.kills, match_stats.deaths));
+                            ui.label(format!("assists: {} mvps: {}", match_stats.assists, match_stats.mvps));
+                        }
+                        if let Some(ref state) = player.state {
+                            ui.label(format!("health: {} armour: {}", state.health, state.armor));
+                            ui.label(format!("helmet: {} cash: {}", match state.helmet { true => "yes", false => "no" }, state.money));
+                            ui.label(format!("flashed: {} smoked: {}", match state.flashed { i if i > 0 => "yes", _ => "no" }, match state.smoked { i if i > 0 => "yes", _ => "no" }));
+                        }
+                    }
+                }
             });
 
             ui.separator();
 
             egui::CollapsingHeader::new("Log").show(&mut ui, |mut ui| {
-                egui::ScrollArea::new([false, true]).max_height(100.0).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {
+                egui::ScrollArea::new([false, true]).max_height(400.0).stick_to_bottom(true).auto_shrink([false, true]).show(&mut ui, |ui| {
                     let logs = self.logs.lock().unwrap();
 
                     let log = logs.concat();
